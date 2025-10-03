@@ -2,4 +2,8 @@ venv
 data
 __pycache__
 chroma_db_temp_no_sync
+chroma_embedding_cache
 results
+models
+scripts/preperation/output
+.env

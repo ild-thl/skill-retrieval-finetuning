@@ -2,7 +2,7 @@ import time
 import numpy as np
 from typing import Dict, List, Set, Optional, Tuple
 from langchain_core.documents import Document
-from langchain_community.vectorstores import Chroma
+from langchain_chroma import Chroma
 import chromadb
 from chromadb.config import Settings
 from langchain_huggingface import HuggingFaceEmbeddings
@@ -30,7 +30,6 @@ class RetrievalEvaluator:
         for qid in queries:
             if qid in relevant_docs and len(relevant_docs[qid]) > 0:
                 self.queries_ids.append(qid)
-
         self.queries = [queries[qid] for qid in self.queries_ids]
 
         self.corpus_ids = list(corpus.keys())
@@ -47,7 +46,7 @@ class RetrievalEvaluator:
 
         self.total_query_chars = sum(len(value) for value in self.queries)
 
-        self.db_client = chromadb.PersistentClient("./chroma_db_temp_no_sync")
+        self.db_client = chromadb.PersistentClient("./tmp/chroma_db_temp_no_sync")
 
     def load_reranker(self, model_name: str) -> FlagReranker:
         return FlagReranker(
@@ -138,7 +137,7 @@ class RetrievalEvaluator:
             return db
 
     def compute_metrics(
-        self, queries_result_list: List[object], total_time: float
+        self, queries_result_list: Dict[str, List[object]], total_time: float
     ) -> Dict[str, Dict[int, float]]:
         # Init score computation values
         num_hits_at_k = {k: 0 for k in self.accuracy_at_k}
@@ -149,12 +148,10 @@ class RetrievalEvaluator:
         AveP_at_k = {k: [] for k in self.map_at_k}
 
         # Compute scores on results
-        for query_itr in range(len(queries_result_list)):
-            query_id = self.queries_ids[query_itr]
-
+        for query_id in self.queries_ids:
             # Sort scores
             top_hits = sorted(
-                queries_result_list[query_itr], key=lambda x: x["score"], reverse=True
+                queries_result_list[query_id], key=lambda x: x["score"], reverse=True
             )
             query_relevant_docs = self.relevant_docs[query_id]
 

@@ -1,6 +1,7 @@
 langchain==0.2.6
 langchain-community==0.2.6
 langchain-huggingface==0.0.3
+langchain-chroma
 sentence-transformers==3.0.1
 FlagEmbedding==1.2.10
 chromadb==0.5.3
@@ -8,7 +9,10 @@ pandas==2.2.2
 scikit-learn==1.5.1
 transformers==4.42.3
 sentencepiece==0.2.0
-numpy==1.26.4
 hf-xet==1.1.5
+seaborn==0.13.2
+matplotlib==3.10.6
+numpy==1.26.4
+python-dotenv==1.0.1
 # InstructorEmbedding
-git+https://github.com/pascalhuerten/instructor-embedding.git#egg=InstructorEmbedding
+# git+https://github.com/pascalhuerten/instructor-embedding.git#egg=InstructorEmbedding
