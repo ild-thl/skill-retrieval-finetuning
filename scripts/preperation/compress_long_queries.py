@@ -105,26 +105,32 @@ class QueryCompressor:
             logger.warning("Dry-run enabled: no LLM requests will be sent.")
         else:
             if OpenAI is None:
-                raise RuntimeError("The 'openai' package is required for live compression.")
+                raise RuntimeError(
+                    "The 'openai' package is required for live compression."
+                )
             if not api_key:
-                raise RuntimeError("LLM API key must be provided via flag or environment variable.")
+                raise RuntimeError(
+                    "LLM API key must be provided via flag or environment variable."
+                )
             self.client = OpenAI(base_url=base_url, api_key=api_key)
 
-    def compress(self, prompt: str, *, attempt: int, meta: Dict[str, object]) -> Optional[str]:
+    def compress(
+        self, prompt: str, *, attempt: int, meta: Dict[str, object]
+    ) -> Optional[str]:
         self._log_prompt(prompt, attempt=attempt, meta=meta)
         if self.dry_run:
             strategy = str(meta.get("strategy", "compress"))
             labels = meta.get("labels", "?")
             if strategy == "llm_clustering":
                 # Return a proper JSON structure for clustering
-                return '''```json
+                return """```json
 {
     "groups": [
         {"labels": ["[DryRun] Cluster 1"]},
         {"labels": ["[DryRun] Cluster 2"]}
     ]
 }
-```'''
+```"""
             elif strategy in {"split", "label_group"}:
                 return f"[DryRun] Kurztext für {labels}"
             return f"[DryRun] komprimiert: {labels}"
@@ -138,7 +144,10 @@ class QueryCompressor:
                     temperature=self.temperature,
                     max_tokens=512,
                     messages=[
-                        {"role": "system", "content": "Du bist eine professionelle Kurstext-Redakteurin."},
+                        {
+                            "role": "system",
+                            "content": "Du bist eine professionelle Kurstext-Redakteurin.",
+                        },
                         {"role": "user", "content": prompt},
                     ],
                 )
@@ -146,7 +155,9 @@ class QueryCompressor:
                 text = text.strip()
                 return text or None
             except Exception as exc:  # pragma: no cover - network errors
-                logger.warning("Compression attempt %s/%s failed: %s", idx, self.max_retries, exc)
+                logger.warning(
+                    "Compression attempt %s/%s failed: %s", idx, self.max_retries, exc
+                )
                 if idx == self.max_retries:
                     raise
                 import time
@@ -155,7 +166,9 @@ class QueryCompressor:
                 delay *= 1.6
         return None
 
-    def _log_prompt(self, prompt: str, *, attempt: int, meta: Dict[str, object]) -> None:
+    def _log_prompt(
+        self, prompt: str, *, attempt: int, meta: Dict[str, object]
+    ) -> None:
         if self.prompt_log_path is None:
             return
         try:
@@ -239,7 +252,12 @@ def load_records(path: Path) -> List[DatasetRecord]:
 
 def tokenize_length(tokenizer: AutoTokenizer, text: str) -> int:
     # Use truncation to avoid warnings about sequences longer than max length
-    tokens = tokenizer.encode(text, add_special_tokens=True, truncation=True, max_length=tokenizer.model_max_length or 512)
+    tokens = tokenizer.encode(
+        text,
+        add_special_tokens=True,
+        truncation=True,
+        max_length=tokenizer.model_max_length or 512,
+    )
     return len(tokens)
 
 
@@ -253,69 +271,77 @@ def should_split(
 ) -> bool:
     if len(record.pos) > max_labels_per_split:
         return True
-    return (token_count >= token_split_threshold and len(record.pos) > 1) or len(record.pos) > label_split_threshold
+    return (token_count >= token_split_threshold and len(record.pos) > 1) or len(
+        record.pos
+    ) > label_split_threshold
 
 
 def chunk_labels(labels: Sequence[str], *, max_per_chunk: int) -> List[List[str]]:
     chunks: List[List[str]] = []
     for idx in range(0, len(labels), max_per_chunk):
-        chunk = [label for label in labels[idx : idx + max_per_chunk] if isinstance(label, str)]
+        chunk = [
+            label
+            for label in labels[idx : idx + max_per_chunk]
+            if isinstance(label, str)
+        ]
         if chunk:
             chunks.append(chunk)
     return chunks or [[]]
 
 
 def chunk_labels_by_similarity(
-    labels: Sequence[str], 
+    labels: Sequence[str],
     *,
     max_per_chunk: int,
     similarity_threshold: float,
-    embedding_helper: EmbeddingHelper
+    embedding_helper: EmbeddingHelper,
 ) -> List[List[str]]:
     """Group labels by semantic similarity to avoid confusion between positive and negative sets."""
     clean_labels = [label for label in labels if isinstance(label, str) and label]
     if not clean_labels or not embedding_helper.enabled:
         return chunk_labels(clean_labels, max_per_chunk=max_per_chunk)
-    
+
     # Encode all labels
     embeddings = {}
     for label in clean_labels:
         vec = embedding_helper.encode(label)
         if vec is not None:
             embeddings[label] = vec
-    
+
     if not embeddings:
         return chunk_labels(clean_labels, max_per_chunk=max_per_chunk)
-    
+
     # Build similarity matrix and group similar labels
     processed = set()
     chunks = []
-    
+
     for label in clean_labels:
         if label in processed or label not in embeddings:
             continue
-            
+
         # Start a new cluster with this label
         cluster = [label]
         processed.add(label)
-        
+
         # Find similar labels to include in the same cluster
         label_vec = embeddings[label]
         for other_label in clean_labels:
-            if (other_label in processed or 
-                other_label not in embeddings or 
-                len(cluster) >= max_per_chunk):
+            if (
+                other_label in processed
+                or other_label not in embeddings
+                or len(cluster) >= max_per_chunk
+            ):
                 continue
-                
+
             other_vec = embeddings[other_label]
             similarity = embedding_helper.cosine(label_vec, other_vec)
-            
+
             if similarity is not None and similarity >= similarity_threshold:
                 cluster.append(other_label)
                 processed.add(other_label)
-        
+
         chunks.append(cluster)
-    
+
     return chunks or [[]]
 
 
@@ -323,20 +349,20 @@ def extract_and_parse_json(text: str) -> dict:
     """Extract and parse JSON from text that may contain markdown code blocks or other formatting."""
     import json
     import re
-    
+
     # First try direct parsing
     try:
         return json.loads(text.strip())
     except json.JSONDecodeError:
         pass
-    
+
     # Try to find JSON in markdown code blocks (```json...``` or ```...```)
     json_patterns = [
-        r'```json\s*(.*?)\s*```',  # ```json ... ```
-        r'```\s*(.*?)\s*```',      # ``` ... ```
-        r'`([^`]*)`',              # `...`
+        r"```json\s*(.*?)\s*```",  # ```json ... ```
+        r"```\s*(.*?)\s*```",  # ``` ... ```
+        r"`([^`]*)`",  # `...`
     ]
-    
+
     for pattern in json_patterns:
         matches = re.findall(pattern, text, re.DOTALL | re.IGNORECASE)
         for match in matches:
@@ -344,37 +370,37 @@ def extract_and_parse_json(text: str) -> dict:
                 return json.loads(match.strip())
             except json.JSONDecodeError:
                 continue
-    
+
     # Try to find JSON-like structure by looking for { ... } blocks
-    brace_pattern = r'\{.*\}'
+    brace_pattern = r"\{.*\}"
     matches = re.findall(brace_pattern, text, re.DOTALL)
     for match in matches:
         try:
             return json.loads(match.strip())
         except json.JSONDecodeError:
             continue
-    
+
     # Try to extract JSON from lines that start and end with { }
-    lines = text.split('\n')
+    lines = text.split("\n")
     json_lines = []
     in_json = False
-    
+
     for line in lines:
         stripped = line.strip()
-        if stripped.startswith('{'):
+        if stripped.startswith("{"):
             in_json = True
             json_lines = [stripped]
         elif in_json:
             json_lines.append(stripped)
-            if stripped.endswith('}'):
+            if stripped.endswith("}"):
                 try:
-                    json_text = '\n'.join(json_lines)
+                    json_text = "\n".join(json_lines)
                     return json.loads(json_text)
                 except json.JSONDecodeError:
                     pass
                 in_json = False
                 json_lines = []
-    
+
     # If all else fails, raise the original parsing error
     raise json.JSONDecodeError("No valid JSON found in text", text, 0)
 
@@ -386,13 +412,15 @@ def chunk_labels_with_llm(
     compressor: QueryCompressor,
 ) -> List[List[str]]:
     """Use LLM to create semantically meaningful and well-differentiable clusters of labels."""
-    clean_labels = [label for label in labels if isinstance(label, str) and label.strip()]
-    
+    clean_labels = [
+        label for label in labels if isinstance(label, str) and label.strip()
+    ]
+
     if len(clean_labels) <= max_per_chunk:
         return [clean_labels] if clean_labels else [[]]
-    
+
     prompt = build_clustering_prompt(labels=clean_labels, max_per_group=max_per_chunk)
-    
+
     try:
         response = compressor.compress(
             prompt,
@@ -403,86 +431,119 @@ def chunk_labels_with_llm(
                 "token_count": len(prompt.split()),  # Rough token estimate
             },
         )
-        
+
         if not response:
-            logger.warning("LLM clustering returned empty response, skipping clustering")
+            logger.warning(
+                "LLM clustering returned empty response, skipping clustering"
+            )
             return None
-        
+
         # Log the raw response for debugging
-        logger.debug(f"LLM clustering raw response: {repr(response[:500])}{'...' if len(response) > 500 else ''}")
-        
+        logger.debug(
+            f"LLM clustering raw response: {repr(response[:500])}{'...' if len(response) > 500 else ''}"
+        )
+
         # Parse JSON response with markdown handling
         import json
+
         try:
             result = extract_and_parse_json(response)
             if not isinstance(result, dict):
-                logger.warning(f"LLM clustering response is not a JSON object, got {type(result).__name__}: {repr(response[:200])}{'...' if len(response) > 200 else ''}")
+                logger.warning(
+                    f"LLM clustering response is not a JSON object, got {type(result).__name__}: {repr(response[:200])}{'...' if len(response) > 200 else ''}"
+                )
                 return None
-                
+
             if "groups" not in result:
-                logger.warning(f"LLM clustering response missing 'groups' key. Available keys: {list(result.keys())}. Response: {repr(response[:300])}{'...' if len(response) > 300 else ''}")
+                logger.warning(
+                    f"LLM clustering response missing 'groups' key. Available keys: {list(result.keys())}. Response: {repr(response[:300])}{'...' if len(response) > 300 else ''}"
+                )
                 return None
-            
+
             clusters = []
             processed_labels = set()
-            
+
             for group_idx, group in enumerate(result["groups"]):
                 if not isinstance(group, dict):
-                    logger.warning(f"Group {group_idx} is not a dict, got {type(group).__name__}: {repr(group)}")
+                    logger.warning(
+                        f"Group {group_idx} is not a dict, got {type(group).__name__}: {repr(group)}"
+                    )
                     continue
-                    
+
                 if "labels" not in group:
-                    logger.warning(f"Group {group_idx} missing 'labels' key. Available keys: {list(group.keys())}")
+                    logger.warning(
+                        f"Group {group_idx} missing 'labels' key. Available keys: {list(group.keys())}"
+                    )
                     continue
-                    
+
                 cluster = []
                 for label_idx, label in enumerate(group["labels"]):
                     if not isinstance(label, str):
-                        logger.warning(f"Label {label_idx} in group {group_idx} is not a string, got {type(label).__name__}: {repr(label)}")
+                        logger.warning(
+                            f"Label {label_idx} in group {group_idx} is not a string, got {type(label).__name__}: {repr(label)}"
+                        )
                         continue
-                        
+
                     clean_label = label.strip()
                     if clean_label in clean_labels:
                         if clean_label not in processed_labels:
                             cluster.append(clean_label)
                             processed_labels.add(clean_label)
                     else:
-                        logger.warning(f"Label '{clean_label}' from LLM response not found in original labels")
-                
+                        logger.warning(
+                            f"Label '{clean_label}' from LLM response not found in original labels"
+                        )
+
                 if cluster:
                     clusters.append(cluster)
-                    logger.debug(f"Created cluster {len(clusters)-1} with {len(cluster)} labels: {cluster[:3]}{'...' if len(cluster) > 3 else ''}")
-            
+                    logger.debug(
+                        f"Created cluster {len(clusters)-1} with {len(cluster)} labels: {cluster[:3]}{'...' if len(cluster) > 3 else ''}"
+                    )
+
             # Add any remaining labels that weren't processed
-            remaining = [label for label in clean_labels if label not in processed_labels]
+            remaining = [
+                label for label in clean_labels if label not in processed_labels
+            ]
             if remaining:
-                logger.info(f"Adding {len(remaining)} unprocessed labels to clusters: {remaining[:3]}{'...' if len(remaining) > 3 else ''}")
+                logger.info(
+                    f"Adding {len(remaining)} unprocessed labels to clusters: {remaining[:3]}{'...' if len(remaining) > 3 else ''}"
+                )
                 if clusters and len(clusters[-1]) + len(remaining) <= max_per_chunk:
                     # Add to last cluster if it fits
                     clusters[-1].extend(remaining)
                 else:
                     # Create additional clusters for remaining labels
                     for i in range(0, len(remaining), max_per_chunk):
-                        chunk = remaining[i:i + max_per_chunk]
+                        chunk = remaining[i : i + max_per_chunk]
                         if chunk:
                             clusters.append(chunk)
-            
+
             if not clusters:
-                logger.warning("LLM clustering produced no valid clusters, skipping clustering")
+                logger.warning(
+                    "LLM clustering produced no valid clusters, skipping clustering"
+                )
                 return None
-            
-            logger.info(f"LLM clustering created {len(clusters)} clusters from {len(clean_labels)} labels")
+
+            logger.info(
+                f"LLM clustering created {len(clusters)} clusters from {len(clean_labels)} labels"
+            )
             return clusters
-            
+
         except json.JSONDecodeError as exc:
-            logger.warning(f"Failed to extract or parse JSON from LLM clustering response: {exc}. Raw response: {repr(response[:400])}{'...' if len(response) > 400 else ''}")
+            logger.warning(
+                f"Failed to extract or parse JSON from LLM clustering response: {exc}. Raw response: {repr(response[:400])}{'...' if len(response) > 400 else ''}"
+            )
             return None
         except (ValueError, KeyError) as exc:
-            logger.warning(f"Failed to process LLM clustering response structure: {exc}. Response: {repr(response[:300])}{'...' if len(response) > 300 else ''}")
+            logger.warning(
+                f"Failed to process LLM clustering response structure: {exc}. Response: {repr(response[:300])}{'...' if len(response) > 300 else ''}"
+            )
             return None
-            
+
     except Exception as exc:
-        logger.warning(f"LLM clustering failed with exception: {exc}, skipping clustering")
+        logger.warning(
+            f"LLM clustering failed with exception: {exc}, skipping clustering"
+        )
         return None
 
 
@@ -521,7 +582,7 @@ def build_clustering_prompt(
 ) -> str:
     """Build a prompt to cluster positive labels into semantically differentiable groups."""
     label_list = "\n".join(f"- {label}" for label in labels if label)
-    
+
     instructions = [
         f"Gruppiere die folgenden Kompetenzen in semantisch unterscheidbare Cluster von maximal {max_per_group} Kompetenzen pro Gruppe.",
         "Jede Gruppe soll thematisch kohärent und von anderen Gruppen klar abgrenzbar sein.",
@@ -531,13 +592,15 @@ def build_clustering_prompt(
         '{"groups": [{"labels": ["Kompetenz 1", "Kompetenz 2"]}, {"labels": ["Kompetenz 3", "Kompetenz 4"]}]}',
         "Verwende keine zusätzlichen Erklärungen oder Kommentare, nur das JSON-Objekt.",
     ]
-    
-    return "\n".join([
-        "Zu gruppierende Kompetenzen:",
-        label_list,
-        "\nAufgabe:",
-        *instructions,
-    ])
+
+    return "\n".join(
+        [
+            "Zu gruppierende Kompetenzen:",
+            label_list,
+            "\nAufgabe:",
+            *instructions,
+        ]
+    )
 
 
 def build_label_group_prompt(
@@ -548,7 +611,10 @@ def build_label_group_prompt(
     target_tokens: int,
     tokenizer_name: str,
 ) -> str:
-    focus_list = ", ".join(sorted(dict.fromkeys([label for label in focus_labels if label]))) or "(keine)"
+    focus_list = (
+        ", ".join(sorted(dict.fromkeys([label for label in focus_labels if label])))
+        or "(keine)"
+    )
     avoid_clean = [label for label in avoid_labels if label]
     avoid_list = ", ".join(sorted(dict.fromkeys(avoid_clean))) if avoid_clean else "—"
     base_char_limit = 200 if len(focus_labels) <= 2 else 260
@@ -562,11 +628,13 @@ def build_label_group_prompt(
         "Gib nur den verdichteten Text zurück.",
     ]
     if avoid_clean:
-        instructions.insert(4, f"Erwähne keine der folgenden Kompetenzen oder Begriffe: {avoid_list}.")
+        instructions.insert(
+            4, f"Erwähne keine der folgenden Kompetenzen oder Begriffe: {avoid_list}."
+        )
     return "\n".join(
         [
             "Fokus-Kompetenzen: " + focus_list,
-            "Zu vermeidende Kompetenzen: " + (avoid_list if avoid_clean else "(keine)") ,
+            "Zu vermeidende Kompetenzen: " + (avoid_list if avoid_clean else "(keine)"),
             "\nAufgabe:",
             *instructions,
             "\nOriginaltext:",
@@ -599,7 +667,12 @@ def process_record(
 ) -> CompressionResult:
     token_count = tokenize_length(tokenizer, record.query)
     if token_count <= max_tokens:
-        return CompressionResult(original=record, replacements=[record], token_counts=[token_count], strategy="keep")
+        return CompressionResult(
+            original=record,
+            replacements=[record],
+            token_counts=[token_count],
+            strategy="keep",
+        )
 
     labels = record.pos
     should_do_split = should_split(
@@ -622,33 +695,37 @@ def process_record(
             )
             if label_groups is None:
                 # LLM clustering failed, skip splitting and just compress
-                logger.info("LLM clustering failed, falling back to compression without splitting")
+                logger.info(
+                    "LLM clustering failed, falling back to compression without splitting"
+                )
                 should_do_split = False
             else:
                 strategy_name = "llm_label_group"
         else:
             label_groups = chunk_labels_by_similarity(
-                labels, 
+                labels,
                 max_per_chunk=max_labels_per_split,
                 similarity_threshold=chunk_similarity_threshold,
-                embedding_helper=embedding_helper
+                embedding_helper=embedding_helper,
             )
             strategy_name = "label_group"
-        
+
         if should_do_split:  # Re-check in case LLM clustering failed
             # Create all other groups as potential negatives
             all_other_labels = []
             for group in label_groups:
                 all_other_labels.extend(group)
-            
+
             for idx, group in enumerate(label_groups):
                 focus_labels = list(dict.fromkeys(group))
                 if not focus_labels:
                     continue
-                    
+
                 # Use labels from other groups as avoid_labels to prevent confusion
-                avoid_labels = [label for label in all_other_labels if label not in focus_labels]
-                
+                avoid_labels = [
+                    label for label in all_other_labels if label not in focus_labels
+                ]
+
                 prompt = build_label_group_prompt(
                     original_text=record.query,
                     focus_labels=focus_labels,
@@ -663,7 +740,10 @@ def process_record(
                         "strategy": strategy_name,
                         "labels": ", ".join(focus_labels),
                         "token_count": token_count,
-                        "avoid": ", ".join(avoid_labels[:5]) + ("..." if len(avoid_labels) > 5 else ""),  # Truncate for readability
+                        "avoid": ", ".join(avoid_labels[:5])
+                        + (
+                            "..." if len(avoid_labels) > 5 else ""
+                        ),  # Truncate for readability
                     },
                 )
                 if response is None:
@@ -671,7 +751,7 @@ def process_record(
                 cleaned = response.strip()
                 if not cleaned:
                     raise RuntimeError("Label-group prompt returned empty text")
-                
+
                 # Check if generated text mentions any forbidden labels
                 lowered = cleaned.casefold()
                 for forbidden in avoid_labels:
@@ -682,7 +762,7 @@ def process_record(
                             forbidden,
                         )
                         break
-                        
+
                 # Use labels from other groups as negatives along with original negatives
                 neg_labels = sorted(dict.fromkeys(list(record.neg) + avoid_labels))
                 new_record = DatasetRecord(
@@ -699,7 +779,7 @@ def process_record(
                 )
                 replacements.append(new_record)
                 token_counts.append(tokenize_length(tokenizer, cleaned))
-                
+
             return CompressionResult(
                 original=record,
                 replacements=replacements,
@@ -716,7 +796,11 @@ def process_record(
     response = compressor.compress(
         prompt,
         attempt=1,
-        meta={"strategy": "compress", "labels": ", ".join(labels), "token_count": token_count},
+        meta={
+            "strategy": "compress",
+            "labels": ", ".join(labels),
+            "token_count": token_count,
+        },
     )
     if response is None:
         raise RuntimeError("Compression prompt returned no content")
@@ -752,17 +836,19 @@ def aggregate_statistics(results: Iterable[CompressionResult]) -> Dict[str, obje
 
 
 def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Compress or split overly long query texts.")
+    parser = argparse.ArgumentParser(
+        description="Compress or split overly long query texts."
+    )
     parser.add_argument("dataset", help="Path to the source dataset JSON file")
     parser.add_argument("output", help="Path to write the augmented dataset JSON file")
     parser.add_argument(
         "--model",
-        default=os.environ.get("LLM_MODEL", "mistral-medium-2508"),
+        default=os.environ.get("LLM_MODEL", "gemma-27b-it"),
         help="Model name for the OpenAI-compatible endpoint",
     )
     parser.add_argument(
         "--base-url",
-        default=os.environ.get("LLM_BASE_URL", "https://api.mistral.ai/v1"),
+        default=os.environ.get("LLM_BASE_URL", "https://chat-ai.academiccloud.de/v1"),
         help="Base URL for the OpenAI-compatible endpoint",
     )
     parser.add_argument(
@@ -888,7 +974,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         model_name=args.similarity_model,
         enabled=not args.disable_similarity_chunking,
     )
-    
+
     if embedding_helper.enabled:
         logger.info(
             "Similarity-aware chunking enabled (model=%s, threshold=%.3f)",
@@ -897,29 +983,29 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         )
     else:
         logger.info("Similarity-aware chunking disabled; using sequential chunking.")
-    
+
     if args.use_llm_clustering:
         logger.info("LLM-based clustering enabled for semantic differentiation")
     else:
         logger.info("Using embedding-based similarity clustering")
 
     records = load_records(dataset_path)
-    
+
     # Analyze dataset and provide overview
     logger.info("=== Dataset Analysis ===")
     token_lengths = []
     records_needing_compression = 0
     records_needing_splitting = 0
     total_pos_labels = 0
-    
+
     for record in records:
         token_count = tokenize_length(tokenizer, record.query)
         token_lengths.append(token_count)
         total_pos_labels += len(record.pos)
-        
+
         if token_count > args.max_tokens:
             records_needing_compression += 1
-            
+
             should_do_split = should_split(
                 record,
                 token_count,
@@ -929,32 +1015,46 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             )
             if should_do_split:
                 records_needing_splitting += 1
-    
+
     avg_tokens = sum(token_lengths) / len(token_lengths) if token_lengths else 0
     max_tokens = max(token_lengths) if token_lengths else 0
     min_tokens = min(token_lengths) if token_lengths else 0
-    
+
     logger.info(f"Total records: {len(records)}")
-    logger.info(f"Token statistics - avg: {avg_tokens:.1f}, max: {max_tokens}, min: {min_tokens}")
-    logger.info(f"Records requiring compression: {records_needing_compression} ({records_needing_compression/len(records)*100:.1f}%)")
-    logger.info(f"Records requiring splitting: {records_needing_splitting} ({records_needing_splitting/len(records)*100:.1f}%)")
-    logger.info(f"Total positive labels: {total_pos_labels}, avg per record: {total_pos_labels/len(records):.1f}")
-    
+    logger.info(
+        f"Token statistics - avg: {avg_tokens:.1f}, max: {max_tokens}, min: {min_tokens}"
+    )
+    logger.info(
+        f"Records requiring compression: {records_needing_compression} ({records_needing_compression/len(records)*100:.1f}%)"
+    )
+    logger.info(
+        f"Records requiring splitting: {records_needing_splitting} ({records_needing_splitting/len(records)*100:.1f}%)"
+    )
+    logger.info(
+        f"Total positive labels: {total_pos_labels}, avg per record: {total_pos_labels/len(records):.1f}"
+    )
+
     if max_tokens > (tokenizer.model_max_length or 512):
-        logger.warning(f"Some records ({max_tokens} tokens) exceed tokenizer max length ({tokenizer.model_max_length or 512}). This may cause truncation during processing.")
-    
+        logger.warning(
+            f"Some records ({max_tokens} tokens) exceed tokenizer max length ({tokenizer.model_max_length or 512}). This may cause truncation during processing."
+        )
+
     logger.info("=== Processing Records ===")
-    
+
     results: List[CompressionResult] = []
     augmented: List[DatasetRecord] = []
 
     for idx, record in enumerate(records):
         # Progress reporting
         if len(records) > 10:  # Only show progress for larger datasets
-            if (idx + 1) % max(1, len(records) // 20) == 0 or idx == 0 or idx == len(records) - 1:
+            if (
+                (idx + 1) % max(1, len(records) // 20) == 0
+                or idx == 0
+                or idx == len(records) - 1
+            ):
                 progress = (idx + 1) / len(records) * 100
                 logger.info(f"Progress: {idx + 1}/{len(records)} ({progress:.1f}%)")
-        
+
         result = process_record(
             record,
             tokenizer=tokenizer,
@@ -981,17 +1081,26 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         stats["max_token_count"],
         stats["min_token_count"],
     )
-    
+
     # Additional statistics
     original_count = len(records)
     final_count = len(augmented)
     expansion_ratio = final_count / original_count if original_count > 0 else 1
-    
-    logger.info(f"Dataset expansion: {original_count} -> {final_count} records (ratio: {expansion_ratio:.2f}x)")
-    
-    records_still_too_long = sum(1 for result in results for count in result.token_counts if count > args.max_tokens)
+
+    logger.info(
+        f"Dataset expansion: {original_count} -> {final_count} records (ratio: {expansion_ratio:.2f}x)"
+    )
+
+    records_still_too_long = sum(
+        1
+        for result in results
+        for count in result.token_counts
+        if count > args.max_tokens
+    )
     if records_still_too_long > 0:
-        logger.warning(f"{records_still_too_long} records still exceed max token limit after processing")
+        logger.warning(
+            f"{records_still_too_long} records still exceed max token limit after processing"
+        )
 
     output = [record.to_dict() for record in augmented]
     with output_path.open("w", encoding="utf-8") as handle:

@@ -2000,12 +2000,12 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
     # LLM configuration
     parser.add_argument(
         "--model",
-        default="mistral-medium-2508",
+        default=os.environ.get("LLM_MODEL", "gemma-27b-it"),
         help="Model name for the OpenAI-compatible endpoint",
     )
     parser.add_argument(
         "--base-url",
-        default=os.environ.get("LLM_BASE_URL", "https://mistral.ai/api/v1"),
+        default=os.environ.get("LLM_BASE_URL", "https://chat-ai.academiccloud.de/v1"),
         help="Base URL for the OpenAI-compatible endpoint",
     )
     parser.add_argument(
@@ -2113,7 +2113,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                 "05": 4.0,  # Naturwissenschaften
                 # Areas with worse performance (medium-high priority)
                 "T6": 2.5,  # Aktive Bürgerschaft - worst performance
-                "S2": 1.0,  # Informationskompetenzen 
+                "S2": 1.0,  # Informationskompetenzen
                 "S4": 1.0,  # Managementfähigkeiten
                 # Well-performing areas (lower priority)
                 "L": 2.0,  # Language skills
